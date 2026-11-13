@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>3D Арена — LAN без установки</title>
+<title>3D Арена — онлайн</title>
 <style>
   * { margin:0; padding:0; box-sizing:border-box; }
   html, body {
@@ -89,7 +89,7 @@
     -webkit-background-clip:text; background-clip:text; color:transparent;
   }
   #menu .sub { opacity:.5; letter-spacing:3px; font-size:12px; margin:6px 0 28px; }
-  .row { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; }
+  .row { display:flex; gap:10px; flex-wrap:wrap; justify-content:center; align-items:stretch; }
   #roomCode {
     width:220px; padding:14px 18px; border-radius:12px; text-align:center;
     border:1px solid rgba(120,170,255,.3); background:rgba(255,255,255,.05);
@@ -97,6 +97,12 @@
     outline:none; text-transform:uppercase;
   }
   #roomCode:focus { border-color:rgba(120,170,255,.7); box-shadow:0 0 22px rgba(90,150,255,.25); }
+  #brokerSelect {
+    padding:14px 12px; border-radius:12px;
+    border:1px solid rgba(120,170,255,.3); background:rgba(255,255,255,.05);
+    color:#dceaff; font-size:14px; outline:none; font-family:inherit; cursor:pointer;
+  }
+  #brokerSelect option { background:#0a1424; color:#dceaff; }
   #joinBtn {
     padding:14px 34px; border:none; border-radius:12px; cursor:pointer;
     font-size:14px; font-weight:800; letter-spacing:2px; color:#04101f;
@@ -109,8 +115,17 @@
   #menuStatus { margin-top:18px; min-height:20px; font-size:13px; letter-spacing:1px; }
   #menuStatus.error { color:#ffb4b4; }
   #menuStatus.ok    { color:#9ec5ff; }
+
+  #diag {
+    margin-top:18px; padding:12px 16px; border-radius:10px;
+    background:rgba(255,255,255,.03); border:1px solid rgba(255,255,255,.08);
+    font-family:monospace; font-size:11.5px; line-height:1.8;
+    opacity:.75; text-align:left; max-width:540px; width:100%;
+  }
+  #diag span { color:#8ec5ff; }
+
   .help {
-    margin-top:32px; font-size:12.5px; line-height:2; opacity:.62;
+    margin-top:28px; font-size:12.5px; line-height:2; opacity:.62;
     max-width:600px; text-align:left;
   }
   .help b { color:#9ec5ff; }
@@ -140,23 +155,35 @@
 
 <div id="menu">
   <h1>АРЕНА 3D</h1>
-  <div class="sub">СЕТЕВОЙ ШУТЕР · БЕЗ УСТАНОВКИ · ЧЕРЕЗ БРАУЗЕР</div>
+  <div class="sub">ОНЛАЙН · 1 НА 1 · БЕЗ УСТАНОВКИ</div>
 
   <div class="row">
-    <input id="roomCode" spellcheck="false" autocomplete="off" maxlength="16">
+    <input id="roomCode" spellcheck="false" autocomplete="off" maxlength="16" placeholder="КОД">
+    <select id="brokerSelect">
+      <option value="emqx443">EMQX (443)</option>
+      <option value="emqx8084">EMQX (8084)</option>
+      <option value="hivemq">HiveMQ</option>
+      <option value="eclipse">Eclipse</option>
+      <option value="mosquitto">Mosquitto</option>
+    </select>
     <button id="joinBtn">ВОЙТИ</button>
   </div>
   <div id="menuStatus"></div>
 
+  <div id="diag">
+    <div>Брокер: <span id="diagBroker">—</span></div>
+    <div>Топик: <span id="diagTopic">—</span></div>
+    <div>Статус: <span id="diagStatus">—</span></div>
+    <div>Hello: <span id="diagHelloSent">0</span> отпр. / <span id="diagHelloRecv">0</span> получ.</div>
+    <div>Всего сообщений: <span id="diagRawRecv">0</span></div>
+  </div>
+
   <div class="help">
-    <b>Как играть:</b> придумайте код комнаты (например <kbd>abc123xyz</kbd>) и введите его <b>на обоих ПК</b>.<br>
-    Код чувствителен к регистру — используйте одинаковый.<br><br>
+    <b>Оба игрока выбирают ОДИН брокер и вводят ОДИН код комнаты.</b><br>
+    Если долго «Ожидание игрока» — сверьте брокер и код по диагностической панели.<br><br>
     <b>Управление:</b> <kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> — движение ·
     <kbd>Мышь</kbd> / <kbd>←</kbd><kbd>→</kbd><kbd>↑</kbd><kbd>↓</kbd> — обзор ·
-    <kbd>ЛКМ</kbd> / <kbd>Enter</kbd> — стрельба · <kbd>Esc</kbd> — освободить курсор<br><br>
-    <b>Тест на одном ПК:</b> откройте эту страницу в двух вкладках и войдите в одну комнату.<br>
-    <b>Требуется интернет</b> для связи (используются бесплатные публичные MQTT-брокеры).<br>
-    Установка, права администратора и открытие портов <b>не нужны</b>.
+    <kbd>ЛКМ</kbd> / <kbd>Enter</kbd> — стрельба · <kbd>Esc</kbd> — освободить курсор
   </div>
 </div>
 
@@ -171,14 +198,13 @@ const EYE    = 1.66;
 const SPEED  = 6.4;
 const RADIUS = 0.42;
 
-/* Список брокеров — пробуются по очереди, пока не подключимся */
-const MQTT_BROKERS = [
-  'wss://broker.emqx.io:443/mqtt',
-  'wss://mqtt.eclipseprojects.io:443/mqtt',
-  'wss://broker.emqx.io:8084/mqtt',
-  'wss://broker.hivemq.com:8884/mqtt',
-  'wss://test.mosquitto.org:8081/mqtt',
-];
+const MQTT_BROKERS = {
+  emqx443:   'wss://broker.emqx.io:443/mqtt',
+  emqx8084:  'wss://broker.emqx.io:8084/mqtt',
+  hivemq:    'wss://broker.hivemq.com:8884/mqtt',
+  eclipse:   'wss://mqtt.eclipseprojects.io:443/mqtt',
+  mosquitto: 'wss://test.mosquitto.org:8081/mqtt'
+};
 
 /* ---------- Сцена ---------- */
 const canvas = document.getElementById('c');
@@ -259,7 +285,7 @@ addBox( 22, 2.5, 0, 1.2, 5, 45, WC, { emissive: WG });
          { emissive:0x081626, emissiveIntensity:0.5 });
 });
 
-/* ---------- Модель игрока ---------- */
+/* ---------- Модель ---------- */
 function buildBody(color) {
   const g = new THREE.Group();
   const suit = new THREE.MeshStandardMaterial({
@@ -274,17 +300,14 @@ function buildBody(color) {
   head.position.y = 1.83;
   const visor = new THREE.Mesh(new THREE.BoxGeometry(0.34,0.09,0.06), dark);
   visor.position.set(0, 1.86, -0.24);
-
   const legGeo = new THREE.CylinderGeometry(0.13,0.11,0.72,10);
   const legL = new THREE.Mesh(legGeo, dark); legL.position.set(-0.16,0.36,0);
   const legR = new THREE.Mesh(legGeo, dark); legR.position.set( 0.16,0.36,0);
-
   const armGeo = new THREE.CylinderGeometry(0.1,0.09,0.68,10);
   const armL = new THREE.Mesh(armGeo, suit);
   armL.position.set(-0.42,1.2,0); armL.rotation.z = 0.16;
   const armR = new THREE.Mesh(armGeo, suit);
   armR.position.set( 0.42,1.2,0); armR.rotation.z = -0.16;
-
   const gun = new THREE.Mesh(new THREE.BoxGeometry(0.11,0.13,0.75), dark);
   gun.position.set(0.4, 1.18, -0.32);
   const barrel = new THREE.Mesh(new THREE.CylinderGeometry(0.035,0.035,0.35,8), dark);
@@ -299,11 +322,10 @@ function buildBody(color) {
   hit.position.y = 1.07;
   g.add(hit);
   g.userData.hitbox = hit;
-
   return g;
 }
 
-/* ---------- Оружие от первого лица ---------- */
+/* ---------- Viewmodel ---------- */
 const vmAccentMat = new THREE.MeshStandardMaterial({
   color:0x3b82f6, emissive:0x3b82f6, emissiveIntensity:0.4, roughness:0.4, metalness:0.6
 });
@@ -323,7 +345,7 @@ const viewmodel = new THREE.Group();
 camera.add(viewmodel);
 
 /* ---------- Состояние ---------- */
-let myClientId = 'arena3d_' + Math.random().toString(36).slice(2, 11);
+const myClientId = 'arena3d_' + Math.random().toString(36).slice(2, 11);
 let myIndex = -1;
 let peerId = null;
 let playing = false;
@@ -336,14 +358,12 @@ const me = {
   hp: 100, score: 0,
   dead: false, respawnTimer: 0, cooldown: 0
 };
-
 const remote = {
   pos: new THREE.Vector3(0, 0, 0),
   target: new THREE.Vector3(0, 0, 0),
   yaw: 0, targetYaw: 0,
   hp: 100, score: 0, dead: false
 };
-
 let remoteMesh = null;
 let remoteHitbox = null;
 
@@ -354,8 +374,7 @@ function createRemoteBody(index) {
       if (o.isMesh) { o.geometry.dispose(); if (o.material.dispose) o.material.dispose(); }
     });
   }
-  const color = index === 0 ? 0x3b82f6 : 0xef4444;
-  remoteMesh = buildBody(color);
+  remoteMesh = buildBody(index === 0 ? 0x3b82f6 : 0xef4444);
   remoteHitbox = remoteMesh.userData.hitbox;
   remoteMesh.position.set(remote.pos.x, 0, remote.pos.z);
   remoteMesh.rotation.y = remote.yaw;
@@ -380,7 +399,6 @@ function updateHUD() {
                       '<span class="en">' + remote.score + '</span>';
   elDead.classList.toggle('show', me.dead && playing);
 }
-
 function flashHit() {
   elFlash.style.transition = 'none';
   elFlash.style.opacity = '1';
@@ -392,7 +410,6 @@ function flashHit() {
 
 /* ---------- Эффекты ---------- */
 const tracers = [], impacts = [];
-
 function spawnTracer(from, to, color) {
   const geo = new THREE.BufferGeometry().setFromPoints([from, to]);
   const mat = new THREE.LineBasicMaterial({ color, transparent:true, opacity:0.95 });
@@ -400,7 +417,6 @@ function spawnTracer(from, to, color) {
   scene.add(line);
   tracers.push({ obj:line, life:0.085, max:0.085 });
 }
-
 function spawnImpact(pos, color) {
   const m = new THREE.Mesh(
     new THREE.SphereGeometry(0.09, 7, 6),
@@ -410,16 +426,12 @@ function spawnImpact(pos, color) {
   scene.add(m);
   impacts.push({ obj:m, life:0.2, max:0.2 });
 }
-
 function updateEffects(dt) {
   for (let i = tracers.length - 1; i >= 0; i--) {
     const t = tracers[i];
     t.life -= dt;
     t.obj.material.opacity = Math.max(0, t.life / t.max) * 0.95;
-    if (t.life <= 0) {
-      scene.remove(t.obj); t.obj.geometry.dispose(); t.obj.material.dispose();
-      tracers.splice(i, 1);
-    }
+    if (t.life <= 0) { scene.remove(t.obj); t.obj.geometry.dispose(); t.obj.material.dispose(); tracers.splice(i, 1); }
   }
   for (let i = impacts.length - 1; i >= 0; i--) {
     const im = impacts[i];
@@ -427,30 +439,45 @@ function updateEffects(dt) {
     const k = Math.max(0, im.life / im.max);
     im.obj.material.opacity = k;
     im.obj.scale.setScalar(0.4 + k * 1.2);
-    if (im.life <= 0) {
-      scene.remove(im.obj); im.obj.geometry.dispose(); im.obj.material.dispose();
-      impacts.splice(i, 1);
-    }
+    if (im.life <= 0) { scene.remove(im.obj); im.obj.geometry.dispose(); im.obj.material.dispose(); impacts.splice(i, 1); }
   }
 }
 
-/* ---------- Сеть: MQTT с перебором брокеров ---------- */
+/* ---------- Сеть ---------- */
 const menu       = document.getElementById('menu');
 const roomInput  = document.getElementById('roomCode');
 const joinBtn    = document.getElementById('joinBtn');
 const menuStatus = document.getElementById('menuStatus');
+const brokerSelect = document.getElementById('brokerSelect');
+
+const diagBroker    = document.getElementById('diagBroker');
+const diagTopic     = document.getElementById('diagTopic');
+const diagStatus    = document.getElementById('diagStatus');
+const diagHelloSent = document.getElementById('diagHelloSent');
+const diagHelloRecv = document.getElementById('diagHelloRecv');
+const diagRawRecv   = document.getElementById('diagRawRecv');
 
 let mqttClient = null;
 let topic = null;
 let helloInterval = null;
-let brokerIndex = 0;
 let connectTimeout = null;
+let currentBrokerName = '—';
+let helloSentCount = 0;
+let helloRecvCount = 0;
+let rawRecvCount = 0;
 
 function setStatus(text, kind) {
   menuStatus.textContent = text || '';
   menuStatus.className = kind || '';
 }
-
+function updateDiag() {
+  diagBroker.textContent    = currentBrokerName;
+  diagTopic.textContent     = topic || '—';
+  diagStatus.textContent    = (mqttClient && mqttClient.connected) ? 'connected' : 'disconnected';
+  diagHelloSent.textContent = helloSentCount;
+  diagHelloRecv.textContent = helloRecvCount;
+  diagRawRecv.textContent   = rawRecvCount;
+}
 function publish(msg) {
   if (!mqttClient || !mqttClient.connected) return;
   msg.from = myClientId;
@@ -461,96 +488,112 @@ function joinRoom(code) {
   code = String(code || '').trim();
   if (!code) { setStatus('Введите код комнаты', 'error'); return; }
 
+  const brokerKey = brokerSelect.value;
+  const url = MQTT_BROKERS[brokerKey];
+  if (!url) { setStatus('Выберите брокер', 'error'); return; }
+
+  currentBrokerName = brokerKey;
+  helloSentCount = 0; helloRecvCount = 0; rawRecvCount = 0;
+
   joinBtn.disabled = true;
   topic = 'arena3d_v1/' + code;
   elRoom.textContent = code;
+  updateDiag();
 
   if (mqttClient) { try { mqttClient.end(true); } catch (e) {} mqttClient = null; }
   if (helloInterval)  { clearInterval(helloInterval); helloInterval = null; }
   if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
 
-  peerId = null; playing = false; myIndex = -1; brokerIndex = 0;
+  peerId = null; playing = false; myIndex = -1;
 
-  tryNextBroker();
-}
-
-function tryNextBroker() {
-  if (brokerIndex >= MQTT_BROKERS.length) {
-    setStatus('Все брокеры недоступны. Проверьте интернет.', 'error');
-    joinBtn.disabled = false;
-    return;
-  }
-
-  const url = MQTT_BROKERS[brokerIndex++];
-  setStatus('Подключение к ' + url.replace('wss://', '').split(':')[0] + '…');
+  setStatus('Подключение к ' + brokerKey + '…');
+  console.log('[arena] connecting to', url, 'topic:', topic);
 
   let connected = false;
-
   connectTimeout = setTimeout(() => {
     if (connected) return;
+    console.error('[arena] connection timeout');
     try { mqttClient.end(true); } catch (e) {}
     mqttClient = null;
-    tryNextBroker();
-  }, 8000);
+    setStatus('Таймаут. Попробуйте другой брокер.', 'error');
+    joinBtn.disabled = false;
+    updateDiag();
+  }, 12000);
 
   try {
     mqttClient = mqtt.connect(url, {
       clientId: myClientId,
       clean: true,
       reconnectPeriod: 0,
-      connectTimeout: 6000,
-      keepalive: 30,
-      will: {
-        topic: topic,
-        payload: JSON.stringify({ from: myClientId, type: 'leave' }),
-        qos: 0, retain: false
-      }
+      connectTimeout: 8000,
+      keepalive: 30
     });
   } catch (e) {
     clearTimeout(connectTimeout); connectTimeout = null;
     mqttClient = null;
-    tryNextBroker();
+    setStatus('Ошибка подключения', 'error');
+    joinBtn.disabled = false;
     return;
   }
 
   mqttClient.on('connect', () => {
     connected = true;
     if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
+    console.log('[arena] connected');
+    updateDiag();
 
     mqttClient.subscribe(topic, { qos: 0 }, (err) => {
       if (err) {
-        setStatus('Ошибка подписки на канал', 'error');
+        setStatus('Ошибка подписки: ' + err.message, 'error');
         joinBtn.disabled = false;
         return;
       }
-      setStatus('Ожидание второго игрока…', 'ok');
+      console.log('[arena] subscribed to', topic);
+      setStatus('Подключено к ' + brokerKey + '. Ожидание игрока…', 'ok');
       publish({ type: 'hello' });
+      helloSentCount++;
+      updateDiag();
+
       if (helloInterval) clearInterval(helloInterval);
       helloInterval = setInterval(() => {
         if (peerId) { clearInterval(helloInterval); helloInterval = null; return; }
         publish({ type: 'hello' });
+        helloSentCount++;
+        updateDiag();
       }, 1500);
     });
   });
 
   mqttClient.on('message', (t, payload) => {
+    rawRecvCount++;
+    updateDiag();
     let msg;
     try { msg = JSON.parse(payload.toString()); } catch (e) { return; }
+    if (msg.type === 'hello' && msg.from !== myClientId) {
+      helloRecvCount++;
+      updateDiag();
+      console.log('[arena] hello received from', msg.from);
+    }
     if (msg.from === myClientId) return;
     handleMessage(msg);
   });
 
-  mqttClient.on('error', () => {
+  mqttClient.on('error', (err) => {
+    console.error('[arena] mqtt error:', err);
     if (connected) return;
     if (connectTimeout) { clearTimeout(connectTimeout); connectTimeout = null; }
     try { mqttClient.end(true); } catch (e) {}
     mqttClient = null;
-    tryNextBroker();
+    setStatus('Ошибка сети. Попробуйте другой брокер.', 'error');
+    joinBtn.disabled = false;
+    updateDiag();
   });
 
   mqttClient.on('close', () => {
+    console.log('[arena] closed');
+    updateDiag();
     if (!connected) return;
-    if (playing) setStatus('Соединение с брокером потеряно', 'error');
+    if (playing) setStatus('Соединение потеряно', 'error');
   });
 }
 
@@ -563,7 +606,6 @@ function handleMessage(msg) {
     startGame();
     return;
   }
-
   if (msg.type === 'hello-ack') {
     if (peerId && peerId !== msg.from) return;
     if (peerId === msg.from && playing) return;
@@ -572,32 +614,27 @@ function handleMessage(msg) {
     startGame();
     return;
   }
-
   if (msg.type === 'busy') {
-    setStatus('Комната уже занята. Введите другой код.', 'error');
+    setStatus('Комната уже занята. Другой код.', 'error');
     joinBtn.disabled = false;
     if (mqttClient) { try { mqttClient.end(true); } catch (e) {} mqttClient = null; }
+    updateDiag();
     return;
   }
-
   if (msg.type === 'leave') {
     if (msg.from !== peerId) return;
     handlePeerLeave();
     return;
   }
-
   if (msg.from !== peerId || !playing) return;
 
   switch (msg.type) {
-
     case 'state': {
       lastPeerStateAt = performance.now();
       remote.target.set(msg.x, 0, msg.z);
       remote.targetYaw = msg.yaw;
-
       if (msg.dead && !remote.dead) {
-        remote.dead = true;
-        remote.hp = 0;
+        remote.dead = true; remote.hp = 0;
         if (!scoredThisDeath) { me.score++; scoredThisDeath = true; }
         if (remoteMesh) remoteMesh.visible = false;
         updateHUD();
@@ -612,7 +649,6 @@ function handleMessage(msg) {
       }
       break;
     }
-
     case 'shot': {
       const col = myIndex === 0 ? 0xef4444 : 0x3b82f6;
       spawnTracer(
@@ -622,31 +658,25 @@ function handleMessage(msg) {
       );
       break;
     }
-
     case 'hit': {
       if (me.dead) break;
       me.hp -= 25;
       if (me.hp <= 0) {
-        me.hp = 0;
-        me.dead = true;
-        me.respawnTimer = 2.0;
+        me.hp = 0; me.dead = true; me.respawnTimer = 2.0;
         remote.score++;
         publish({ type:'state', x:me.pos.x, z:me.pos.z, yaw:me.yaw, hp:0, dead:true });
       } else {
         publish({ type:'state', x:me.pos.x, z:me.pos.z, yaw:me.yaw, hp:me.hp, dead:false });
       }
-      flashHit();
-      updateHUD();
+      flashHit(); updateHUD();
       break;
     }
-
     case 'respawn': {
       remote.target.set(msg.x, 0, msg.z);
       remote.pos.set(msg.x, 0, msg.z);
       remote.targetYaw = msg.yaw;
       remote.yaw = msg.yaw;
-      remote.hp = 100;
-      remote.dead = false;
+      remote.hp = 100; remote.dead = false;
       scoredThisDeath = false;
       if (remoteMesh) remoteMesh.visible = true;
       updateHUD();
@@ -690,8 +720,7 @@ function startGame() {
   playing = true;
   menu.style.display = 'none';
   setStatus('', '');
-  updateHUD();
-  updateHint();
+  updateHUD(); updateHint();
 
   publish({ type:'state', x:me.pos.x, z:me.pos.z, yaw:me.yaw, hp:me.hp, dead:false });
 }
@@ -703,11 +732,11 @@ let sendAccum = 0;
 
 function onKeyDown(e) {
   const tag = (e.target && e.target.tagName) || '';
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
   keys[e.code] = true;
-  const gameKeys = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space',
-                    'KeyW','KeyA','KeyS','KeyD','Enter','NumpadEnter'];
-  if (gameKeys.indexOf(e.code) !== -1) e.preventDefault();
+  const gk = ['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space',
+              'KeyW','KeyA','KeyS','KeyD','Enter','NumpadEnter'];
+  if (gk.indexOf(e.code) !== -1) e.preventDefault();
 }
 function onKeyUp(e) { keys[e.code] = false; }
 document.addEventListener('keydown', onKeyDown, false);
@@ -739,9 +768,7 @@ function requestLock() {
     if (p && typeof p.catch === 'function') p.catch(() => {});
   } catch (e) {}
 }
-
 document.addEventListener('pointerlockchange', updateHint);
-
 function updateHint() {
   const needLock = playing && document.pointerLockElement !== canvas;
   elHint.classList.toggle('hide', !needLock);
@@ -814,8 +841,8 @@ function shoot() {
   const muzzle = origin.clone().addScaledVector(_right, 0.22).addScaledVector(_dir, 0.5);
   muzzle.y -= 0.16;
 
-  const myColorHex = myIndex === 0 ? 0x3b82f6 : 0xef4444;
-  spawnTracer(muzzle, end, myColorHex);
+  const col = myIndex === 0 ? 0x3b82f6 : 0xef4444;
+  spawnTracer(muzzle, end, col);
 
   publish({ type:'shot', fx:muzzle.x, fy:muzzle.y, fz:muzzle.z,
                          tx:end.x, ty:end.y, tz:end.z });
@@ -838,7 +865,6 @@ function update(dt) {
       me.hp = 100; me.dead = false;
       me.yaw = Math.atan2(-(remote.pos.x - best[0]), -(remote.pos.z - best[1]));
       me.pitch = 0;
-
       publish({ type:'respawn', x:me.pos.x, z:me.pos.z, yaw:me.yaw });
       publish({ type:'state', x:me.pos.x, z:me.pos.z, yaw:me.yaw, hp:100, dead:false });
       updateHUD();
@@ -857,7 +883,6 @@ function update(dt) {
       if (keys['KeyS']) mz -= 1;
       if (keys['KeyA']) mx -= 1;
       if (keys['KeyD']) mx += 1;
-
       if (mx || mz) {
         const len = Math.hypot(mx, mz); mx /= len; mz /= len;
         const sy = Math.sin(me.yaw), cy = Math.cos(me.yaw);
@@ -865,7 +890,6 @@ function update(dt) {
         const dz = (-sy * mx - cy * mz) * SPEED * dt;
         tryMove(me, dx, dz);
       }
-
       if (mouseDown || keys['Enter'] || keys['NumpadEnter']) shoot();
     }
   }
@@ -918,6 +942,7 @@ function loop(now) {
 }
 
 updateHUD();
+updateDiag();
 requestAnimationFrame(loop);
 
 })();
